@@ -1,0 +1,70 @@
+import numpy as np
+import matplotlib.pyplot as plt
+import random
+import time
+
+start = time.time()
+
+# Constants
+N = 100  # Update lattice size to 100 x 100
+T_low = 1.0
+T_high = 3.0
+J = 1  # Coupling constant
+kB = 1  # Boltzmann constant
+MC_steps = 20000  # Total Monte Carlo steps per lattice site for observation
+
+def total_energy(systemstate):
+    E = 0
+    for i in range(N):
+        for j in range(N):
+            E -= J * systemstate[i, j] * (systemstate[i, (j+1) % N] + systemstate[i, (j-1) % N] + systemstate[(i+1) % N, j] + systemstate[(i-1) % N, j])
+    return E
+
+def total_magnetization(systemstate):
+    M = np.sum(systemstate)
+    return M
+
+def monte_carlo_step(systemstate, T):
+    beta = 1 / (kB * T)
+    for _ in range(N**2):  # Ensures each spin is considered once on average per step
+        a, b = np.random.randint(0, N, 2)
+        dE = 2 * J * systemstate[a, b] * (systemstate[a, (b+1) % N] + systemstate[a, (b-1) % N] + systemstate[(a+1) % N, b] + systemstate[(a-1) % N, b])
+        if dE >= 0 or random.random() < np.exp(-beta * dE):
+            systemstate[a, b] = -systemstate[a, b]
+    return systemstate
+
+# Initialize the lattice with random spins for T = infinity
+systemstate = np.random.choice([-1, 1], size=(N, N))
+
+E_values, M_values = [], []
+
+for _ in range(MC_steps):
+    systemstate = monte_carlo_step(systemstate, T_high)  # Using T_high as an example; adjust as needed
+    E = total_energy(systemstate)
+    M = total_magnetization(systemstate)
+    E_values.append(E)
+    M_values.append(M)
+
+# Plotting
+plt.figure(figsize=(12, 6))
+
+plt.subplot(1, 2, 1)
+plt.plot(E_values, label='Energy')
+plt.title('Energy vs. Monte Carlo Steps')
+plt.xlabel('Monte Carlo Step')
+plt.ylabel('Energy')
+plt.legend()
+
+plt.subplot(1, 2, 2)
+m = np.array(M_values) / (N**2)  # Correct normalization for magnetization per spin
+plt.plot(m, label='Magnetization per spin')
+plt.title('Magnetization vs. Monte Carlo Steps')
+plt.xlabel('Monte Carlo Step')
+plt.ylabel('Magnetization per spin')
+plt.legend()
+
+plt.tight_layout()
+plt.show()
+
+end = time.time()
+print(end - start)
