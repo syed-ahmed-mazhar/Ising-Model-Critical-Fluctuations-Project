@@ -1,0 +1,109 @@
+import numpy as np
+import matplotlib.pyplot as plt
+from numba import njit
+import time
+
+N = 200  # Lattice size
+J = 1 # Coupling constant
+
+start_time = time.time() #Calculates time of simulation
+
+       
+sweeps = 20000  # Total number of lattice sweeps
+T_values = [3.5, 2.22, 2.32, 2.0]  # Temperatures for observation
+
+
+
+    
+def precompute_exponential_values(T_values):
+    # Precompute exponential values for the possible ΔE values in a 2D Ising model, making our algorithm faster as we dont need to calculate the few possible exponential values each time, can simply 
+    #it look up
+    delta_E = np.array([-8, -4, 0, 4, 8]) * J
+    precomputed_exp = {T: np.exp(-1 / T * delta_E) for T in T_values}
+    return precomputed_exp
+
+@njit
+def monte_carlo_step(system_state, exponential_values_for_T):
+    for _ in range(N**2):  # One sweep = N^2 Monte Carlo steps
+        i, j = np.random.randint(0, N, 2)
+        spin = system_state[i, j]
+        delta_E = 2 * J * spin * (system_state[(i+1)%N, j] + system_state[i, (j+1)%N] + system_state[(i-1)%N, j] + system_state[i, (j-1)%N]) 
+        #Modulo N applies periodic boundary conditions
+                                  
+        index = (delta_E + 8) // 4  # Convert ΔE to an index for the exponential_values_for_T array
+        if delta_E <= 0 or np.random.rand() < exponential_values_for_T[index]:
+            system_state[i, j] = -spin
+    return system_state
+
+@njit
+def total_energy(system_state):
+    energy = 0
+    for i in range(N):
+        for j in range(N):
+            S = system_state[i, j]
+            neighbors = system_state[(i+1)%N, j] + system_state[(i-1)%N, j] + \
+                        system_state[i, (j+1)%N] + system_state[i, (j-1)%N]
+            energy += -J * S * neighbors
+    return energy / 2.0  # Correct double counting
+
+def simulate(N, sweeps, T, exponential_values_for_T, seed):
+    np.random.seed(seed)  # Set the seed for reproducibility
+    system_state = np.random.choice([-1, 1], (N, N))  # Initialize the system state
+    E_values, M_values = [], []
+
+    for _ in range(sweeps):
+        system_state = monte_carlo_step(system_state, exponential_values_for_T)
+        E = total_energy(system_state)
+        M = np.sum(system_state)
+        E_values.append(E)
+        M_values.append(M)
+
+    return E_values, M_values
+
+def plot_simulation_results(N, sweeps, T_values, precomputed_exp):
+    # Define two seeds for generating the initial states
+    seeds = [42, 91]
+    
+    # Set up figure for plotting
+    fig, axs = plt.subplots(len(T_values), 2, figsize=(20, 25))
+
+    for i, T in enumerate(T_values):
+        exponential_values_for_T = precomputed_exp[T]
+        
+        # Initialize lists to hold energy and magnetization values for both seeds
+        E_values_seeds = []
+        M_values_seeds = []
+        
+        for seed in seeds:
+            # Simulate and store results for each seed
+            E_values, M_values = simulate(N, sweeps, T, exponential_values_for_T, seed)
+            E_values_seeds.append(E_values)
+            M_values_seeds.append(M_values)
+
+        # Plot Energy for this temperature
+        axs[i, 0].plot(np.arange(sweeps), E_values_seeds[0], label=f'Seed={seeds[0]}')
+        axs[i, 0].plot(np.arange(sweeps), E_values_seeds[1], label=f'Seed={seeds[1]}', linestyle='--')
+        axs[i, 0].set_xlabel('Sweeps')
+        axs[i, 0].set_ylabel('Energy')
+        axs[i, 0].set_title(f'Energy over Sweeps at T={T}')
+        axs[i, 0].legend()
+
+        # Plot Magnetization for this temperature
+        axs[i, 1].plot(np.arange(sweeps), [m/N**2 for m in M_values_seeds[0]], label=f'Seed={seeds[0]}')
+        axs[i, 1].plot(np.arange(sweeps), [m/N**2 for m in M_values_seeds[1]], label=f'Seed={seeds[1]}', linestyle='--')
+        axs[i, 1].set_xlabel('Sweeps')
+        axs[i, 1].set_ylabel('Magnetization per spin')
+        axs[i, 1].set_title(f'Magnetization over Sweeps at T={T}')
+        axs[i, 1].legend()
+
+    plt.tight_layout()
+    plt.show()
+
+# Precompute exponential values for all possible ΔE values in a 2D Ising model
+precomputed_exp = precompute_exponential_values(T_values)
+
+# Run simulation and plot results for each temperature
+plot_simulation_results(N, sweeps, T_values, precomputed_exp)
+
+end_time = time.time()
+print(f"Total simulation time: {(end_time - start_time) / 60:.2f} minutes")
