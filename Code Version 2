@@ -1,15 +1,15 @@
 import numpy as np
 import matplotlib.pyplot as plt
-from numba import njit
+from numba import njit #Just in Time Compiler to speeden up the code
 import time
 
-N = 200  # Lattice size
+N = 200 # Lattice size
 J = 1 # Coupling constant
 
 start_time = time.time() #Calculates time of simulation
 
        
-sweeps = 20000  # Total number of lattice sweeps
+sweeps = 25000 # Total number of lattice sweeps
 T_values = [3.5, 2.22, 2.32, 2.0]  # Temperatures for observation
 
 
@@ -23,19 +23,6 @@ def precompute_exponential_values(T_values):
     return precomputed_exp
 
 @njit
-def monte_carlo_step(system_state, exponential_values_for_T):
-    for _ in range(N**2):  # One sweep = N^2 Monte Carlo steps
-        i, j = np.random.randint(0, N, 2)
-        spin = system_state[i, j]
-        delta_E = 2 * J * spin * (system_state[(i+1)%N, j] + system_state[i, (j+1)%N] + system_state[(i-1)%N, j] + system_state[i, (j-1)%N]) 
-        #Modulo N applies periodic boundary conditions
-                                  
-        index = (delta_E + 8) // 4  # Convert ΔE to an index for the exponential_values_for_T array
-        if delta_E <= 0 or np.random.rand() < exponential_values_for_T[index]:
-            system_state[i, j] = -spin
-    return system_state
-
-@njit
 def total_energy(system_state):
     energy = 0
     for i in range(N):
@@ -46,14 +33,33 @@ def total_energy(system_state):
             energy += -J * S * neighbors
     return energy / 2.0  # Correct double counting
 
+@njit
+def monte_carlo_step(system_state, exponential_values_for_T,E):
+   
+    for _ in range(N**2):  # One sweep = N^2 Monte Carlo steps
+        i, j = np.random.randint(0, N, 2)
+        spin = system_state[i, j]
+        delta_E = 2 * J * spin * (system_state[(i+1)%N, j] + system_state[i, (j+1)%N] + system_state[(i-1)%N, j] + system_state[i, (j-1)%N]) 
+        #Modulo N applies periodic boundary conditions
+                                 
+        index = (delta_E + 8) // 4  # Convert ΔE to an index for the exponential_values_for_T array
+        if delta_E <= 0 or np.random.rand() < exponential_values_for_T[index]:
+            system_state[i, j] = -spin
+            E += delta_E #we update the value of E each time we flip a spin by adding change in E, instead of recalculating it every time which would make our Simulation slow for large systems
+    return system_state, E 
+
+
+
 def simulate(N, sweeps, T, exponential_values_for_T, seed):
     np.random.seed(seed)  # Set the seed for reproducibility
     system_state = np.random.choice([-1, 1], (N, N))  # Initialize the system state
     E_values, M_values = [], []
-
+    
+    E= total_energy(system_state)
+    
     for _ in range(sweeps):
-        system_state = monte_carlo_step(system_state, exponential_values_for_T)
-        E = total_energy(system_state)
+        system_state, E = monte_carlo_step(system_state, exponential_values_for_T, E)
+        
         M = np.sum(system_state)
         E_values.append(E)
         M_values.append(M)
@@ -62,12 +68,12 @@ def simulate(N, sweeps, T, exponential_values_for_T, seed):
 
 def plot_simulation_results(N, sweeps, T_values, precomputed_exp):
     # Define two seeds for generating the initial states
-    seeds = [42, 91]
+    seeds = [42, 90]
     
     # Set up figure for plotting
-    fig, axs = plt.subplots(len(T_values), 2, figsize=(20, 25))
+    fig, axs = plt.subplots(len(T_values), 2, figsize=(20, 21)) #8 Plots in 4 rows(4 different Temperatures for comparison), with 2 columns representing the values for Energy and mean Magnetization per spin
 
-    for i, T in enumerate(T_values):
+    for i, T in enumerate(T_values): #We use enumerate() in a for loop to get the index & the item
         exponential_values_for_T = precomputed_exp[T]
         
         # Initialize lists to hold energy and magnetization values for both seeds
@@ -80,26 +86,30 @@ def plot_simulation_results(N, sweeps, T_values, precomputed_exp):
             E_values_seeds.append(E_values)
             M_values_seeds.append(M_values)
 
-        # Plot Energy for this temperature
+        # Plot Energy for this temperature, this would mean we are looking at the ith row, 1st column graph for all values of i
         axs[i, 0].plot(np.arange(sweeps), E_values_seeds[0], label=f'Seed={seeds[0]}')
         axs[i, 0].plot(np.arange(sweeps), E_values_seeds[1], label=f'Seed={seeds[1]}', linestyle='--')
-        axs[i, 0].set_xlabel('Sweeps')
+        axs[i, 0].set_xlabel('Lattice Sweeps')
         axs[i, 0].set_ylabel('Energy')
         axs[i, 0].set_title(f'Energy over Sweeps at T={T}')
         axs[i, 0].legend()
 
-        # Plot Magnetization for this temperature
+        # Plot Magnetization for this temperature, this would mean we are looking at the ith row, 2nd column graph for all values of i
         axs[i, 1].plot(np.arange(sweeps), [m/N**2 for m in M_values_seeds[0]], label=f'Seed={seeds[0]}')
         axs[i, 1].plot(np.arange(sweeps), [m/N**2 for m in M_values_seeds[1]], label=f'Seed={seeds[1]}', linestyle='--')
-        axs[i, 1].set_xlabel('Sweeps')
+        axs[i, 1].set_xlabel('Lattice Sweeps')
         axs[i, 1].set_ylabel('Magnetization per spin')
         axs[i, 1].set_title(f'Magnetization over Sweeps at T={T}')
         axs[i, 1].legend()
 
-    plt.tight_layout()
+    plt.tight_layout() #Ensures the subplots don't overlap with each other or with the labels
+    
+    
+    
     plt.show()
 
-# Precompute exponential values for all possible ΔE values in a 2D Ising model
+
+# Precompute exponential values for all possible delta E values in a 2D Ising model
 precomputed_exp = precompute_exponential_values(T_values)
 
 # Run simulation and plot results for each temperature
@@ -107,3 +117,4 @@ plot_simulation_results(N, sweeps, T_values, precomputed_exp)
 
 end_time = time.time()
 print(f"Total simulation time: {(end_time - start_time) / 60:.2f} minutes")
+
