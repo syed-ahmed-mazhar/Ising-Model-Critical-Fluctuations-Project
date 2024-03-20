@@ -240,30 +240,34 @@ print(f"Total simulation time: {(end_time - start_time) / 60:.2f} minutes")
 
 Part 4:
 start_time = time.time()
-
 @njit
 def swendsen_wang_step(lattice, T):
-    P_add = 1 - np.exp(-2 * J / T)
-    label = np.zeros_like(lattice, dtype=np.int_) - 1
+    P_add = 1 - np.exp(-2 * J / T)  # Probability to add a bond
+    label = np.zeros_like(lattice, dtype=np.int_) - 1  # Cluster labels
     cluster_id = 0
     for i in range(N):
         for j in range(N):
-            if label[i, j] == -1:  # not labeled yet
+            if label[i, j] == -1:  # Site not yet labeled
                 stack = [(i, j)]
                 label[i, j] = cluster_id
                 while stack:
                     x, y = stack.pop()
                     for dx, dy in [(1, 0), (-1, 0), (0, 1), (0, -1)]:
-                        nx, ny = (x + dx) % N, (y + dy) % N
+                        nx, ny = (x + dx) % N, (y + dy) % N  # Periodic boundary
                         if label[nx, ny] == -1 and lattice[x, y] == lattice[nx, ny] and np.random.random() < P_add:
                             stack.append((nx, ny))
                             label[nx, ny] = cluster_id
                 cluster_id += 1
-    # Flip each cluster
+
+    # Manually flip clusters to avoid boolean indexing
     for cid in range(cluster_id):
         if np.random.random() < 0.5:
-            lattice[label == cid] *= -1
+            for i in range(N):
+                for j in range(N):
+                    if label[i, j] == cid:
+                        lattice[i, j] *= -1
     return lattice
+
 
 def simulate_swendsen_wang(N, steps, T):
     lattice = np.random.choice([-1, 1], size=(N, N))
@@ -272,6 +276,7 @@ def simulate_swendsen_wang(N, steps, T):
         lattice = swendsen_wang_step(lattice, T)
         magnetizations.append(np.sum(lattice))
     return np.array(magnetizations)
+
 
 def autocorrelation(magnetizations):
     mag_mean = np.mean(magnetizations)
@@ -282,19 +287,22 @@ def autocorrelation(magnetizations):
 correlation_times = []
 for T in T_values:
     mags = simulate_swendsen_wang(N, steps, T)
-    acf = autocorrelation(mags[500:])  # Skipping initial steps to allow equilibration
-    correlation_time = simps(normalized_autocorr[:min_index+1], dx=1)
-    scaled_correlation_time = correlation_time * avg_flips / (N*N)
-    correlation_times.append(scaled_correlation_time)
+    acf = autocorrelation(mags[500:])  # Discard initial steps for equilibration
+    normalized_acf = acf / acf[0]
 
-# Plotting the scaled correlation times
+    min_indices = np.where(normalized_acf < 0.1)[0]
+    min_index = min_indices[0] if min_indices.size > 0 else len(normalized_acf) - 1
+
+    correlation_time = simps(normalized_acf[:min_index+1], dx=1)
+    correlation_times.append(correlation_time)
+
 plt.figure(figsize=(10, 6))
-plt.plot(T_values, np.array(correlation_times) * 10, 'o-', color='blue')
+plt.plot(T_values, correlation_times, 'o-', color='blue')
 plt.xlabel('Temperature (T)')
-plt.ylabel('Scaled Correlation Time')
-plt.title('Correlation Time vs Temperature for Wolff Algorithm')
+plt.ylabel('Correlation Time')
+plt.title('Correlation Time vs Temperature for the 2D Ising Model with Swendsen-Wang Algorithm')
 plt.grid(True)
-plt.show()
 end_time = time.time()
-print(f"Total simulation time: {(end_time - start_time) / 60:.2f} minutes")
+plt.show()
+
 
