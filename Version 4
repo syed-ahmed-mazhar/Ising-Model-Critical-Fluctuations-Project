@@ -68,7 +68,6 @@ plt.show()
 
 print(f"Total simulation time: {(end_time - start_time) / 60:.2f} minutes")
 
-
 Part 4:
 start_time = time.time()
 @njit
@@ -124,18 +123,17 @@ def autocorrelation(datapoints):
     
     return autocorr
 
-
-    
 correlation_times = []
 for T in T_values:
-    M_values = simulate_swendsen_wang(N, steps , T)
-    autocorr_values = autocorrelation(np.array(M_values))
-    normalized_autocorr = autocorr_values / autocorr_values[0]
-    min_indices = np.where(normalized_autocorr < 0.1)[0]
-    min_index = min_indices[0] if min_indices.size > 0 else len(normalized_autocorr) - 1
-    correlation_time = simps(normalized_autocorr[:min_index+1], dx=1)
-    scaled_correlation_time = correlation_time * avg_flips / (N*N)
-    correlation_times.append(scaled_correlation_time)
+    mags = simulate_swendsen_wang(N, steps, T)
+    acf = autocorrelation(mags[500:])  # Discard initial steps for equilibration
+    normalized_acf = acf / acf[0]
+
+    min_indices = np.where(normalized_acf < 0.1)[0]
+    min_index = min_indices[0] if min_indices.size > 0 else len(normalized_acf) - 1
+
+    correlation_time = simps(normalized_acf[:min_index+1], dx=1)
+    correlation_times.append(correlation_time)
 
 plt.figure(figsize=(10, 6))
 plt.plot(T_values, np.array(correlation_times) * 10, 'o-', color='blue')
@@ -147,5 +145,4 @@ end_time = time.time()
 plt.show()
 
 print(f"Total simulation time: {(end_time - start_time) / 60:.2f} minutes")
-
 
