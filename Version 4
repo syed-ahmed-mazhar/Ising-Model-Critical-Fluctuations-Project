@@ -1,0 +1,151 @@
+Part 2:
+from scipy.integrate import simps
+
+
+def autocorrelation(datapoints):
+    M = len(datapoints)
+    autocorr = np.zeros(M) #Initialize an array to store the autocorrelation function values at all times
+    for t in range(M):
+        # Calculating the mean product of datapoints and their lagged versions
+        mean_product = np.mean(datapoints[:M-t] * datapoints[t:])
+        # 2nd Term in Formula
+        mean_original = np.mean(datapoints[:M-t])
+        # 3rd Term in Formula
+        mean_lagged = np.mean(datapoints[t:])
+        # Implementing the formula from the book
+        autocorr[t] = mean_product - mean_original * mean_lagged
+    
+    return autocorr
+
+N = 100  # Lattice size
+sweeps = 10000  # Total number of lattice sweeps
+T_values = np.linspace(2, 3.5, 35)  # Temperature range between above and below critical temperature to observe how autocorrelation time behaves
+precomputed_exp = precompute_exponential_values(T_values)
+correlation_times = []
+
+start_time = time.time()
+
+for T in T_values:
+    if T > 2.25 and T <2.27: #Equilibration time is higher close to critical temperature, so better to give it more time to equilibrate
+        E_values, M_values = simulate(N, sweeps + (N * 250), T, precomputed_exp[T], seed=42)
+        datapoints = np.array(M_values[250 * N:])  # Use magnetization values after equilibration
+        autocorr_fct = autocorrelation(datapoints)
+        normalized_autocorr_fct = autocorr_fct / autocorr_fct[0]  # Normalize in order to integrate it and obtain correlation time
+    
+    # Find where autocorrelation function becomes negligible or zero, since integration for an infinite time is impractical
+        min_indices = np.where(normalized_autocorr_fct < 0.1)[0]
+        min_index = min_indices[0] if min_indices.size > 0 else len(normalized_autocorr_fct) - 1
+    
+    # Integrate using Simpson's rule up to min_index,i.e time where autocorrelation function essentially becomes 0
+        correlation_time = simps(normalized_autocorr_fct[:min_index + 1], dx=1)
+        correlation_times.append(correlation_time)
+        
+    else:
+        
+        E_values, M_values = simulate(N, sweeps + (N * 80) , T, precomputed_exp[T], seed=42)
+        datapoints = np.array(M_values[80 * N:])  # Use magnetization values after equilibration
+        autocorr_fct = autocorrelation(datapoints)
+        normalized_autocorr_fct = autocorr_fct / autocorr_fct[0]  # Normalize in order to integrate it and obtain correlation time
+    
+    # Find where autocorrelation function becomes negligible or zero, since integration for an infinite time is impractical
+        min_indices = np.where(normalized_autocorr_fct < 0.1)[0]
+        min_index = min_indices[0] if min_indices.size > 0 else len(normalized_autocorr_fct) - 1
+    
+    # Integrate using Simpson's rule up to min_index,i.e time where autocorrelation function essentially becomes 0
+        correlation_time = simps(normalized_autocorr_fct[:min_index + 1], dx=1)
+        correlation_times.append(correlation_time)
+
+# Plot Correlation time as a function of Temperature
+plt.figure(figsize=(10, 6))
+plt.plot(T_values, correlation_times, marker='o', linestyle='-', color='blue')
+plt.xlabel('Temperature (T)')
+plt.ylabel('Correlation Time in Lattice Sweeps')
+plt.title('Correlation Time vs. Temperature for Metropolis Algorithm')
+plt.grid(True)
+end_time = time.time()
+plt.show()
+
+
+print(f"Total simulation time: {(end_time - start_time) / 60:.2f} minutes")
+
+
+Part 4:
+start_time = time.time()
+@njit
+def swendsen_wang_step(lattice, T):
+    P_add = 1 - np.exp(-2 * J / T)  # Probability to add a bond
+    label = np.zeros_like(lattice, dtype=np.int_) - 1  # create a lattice with same shape as cluster, initially all with value -1 to help label the clusters
+    cluster_id = 0 #Initially have the cluster ID counter set to 0, and each cluster should have it's own ID Number to potentially flip it
+    for i in range(N):
+        for j in range(N):
+            if label[i, j] == -1:  # If the value is -1, it means the site not yet labeled
+                stack = [(i, j)] # if current site is unlabeled, create a stack with the current site and label the sites with the current cluster identification number
+                label[i, j] = cluster_id
+                while stack: #Continue as long as there are sites in the stack
+                    x, y = stack.pop()
+                    for dx, dy in [(1, 0), (-1, 0), (0, 1), (0, -1)]: #Iterate over the four current neighbours
+                        nx, ny = (x + dx) % N, (y + dy) % N  # #Again apply the periodic boundary conditions
+                        if label[nx, ny] == -1 and lattice[x, y] == lattice[nx, ny] and np.random.random() < P_add: #Checks whether the neighbour hasn't been already considered, if it matches the current spin state and if it probabilistically gets added
+                            stack.append((nx, ny)) #If all conditions are met, neighbours are added to the cluster and labelled with the current cluster id
+                            label[nx, ny] = cluster_id
+                cluster_id += 1
+
+    # Manually flip clusters 
+    for cid in range(cluster_id): #Identifies the clusters that we could potentially flip
+        if np.random.random() < 0.5: #Flip the clusters with a probability of 0.5
+            for i in range(N):
+                for j in range(N):
+                    if label[i, j] == cid:
+                        lattice[i, j] *= -1
+    return lattice
+
+
+def simulate_swendsen_wang(N, steps, T):
+    lattice = np.random.choice([-1, 1], size=(N, N))
+    magnetizations = []
+    for _ in range(steps):
+        lattice = swendsen_wang_step(lattice, T)
+        magnetizations.append(np.sum(lattice))
+    return np.array(magnetizations)
+
+
+def autocorrelation(datapoints):
+    M = len(datapoints)
+    autocorr = np.zeros(M) #Initialize an array to store the autocorrelation function values at all times
+    for t in range(M):
+        # Calculating the mean product of datapoints and their lagged versions
+        mean_product = np.mean(datapoints[:M-t] * datapoints[t:])
+        # 2nd Term in Formula
+        mean_original = np.mean(datapoints[:M-t])
+        # 3rd Term in Formula
+        mean_lagged = np.mean(datapoints[t:])
+        # Implementing the formula from the book
+        autocorr[t] = mean_product - mean_original * mean_lagged
+    
+    return autocorr
+
+
+    
+correlation_times = []
+for T in T_values:
+    M_values = simulate_swendsen_wang(N, steps , T)
+    autocorr_values = autocorrelation(np.array(M_values))
+    normalized_autocorr = autocorr_values / autocorr_values[0]
+    min_indices = np.where(normalized_autocorr < 0.1)[0]
+    min_index = min_indices[0] if min_indices.size > 0 else len(normalized_autocorr) - 1
+    correlation_time = simps(normalized_autocorr[:min_index+1], dx=1)
+    scaled_correlation_time = correlation_time * avg_flips / (N*N)
+    correlation_times.append(scaled_correlation_time)
+
+plt.figure(figsize=(10, 6))
+plt.plot(T_values, np.array(correlation_times) * 10, 'o-', color='blue')
+plt.xlabel('Temperature (T)')
+plt.ylabel('Correlation Time')
+plt.title('Correlation Time vs Temperature for the Swendsen-Wang Algorithm')
+plt.grid(True)
+end_time = time.time()
+plt.show()
+
+print(f"Total simulation time: {(end_time - start_time) / 60:.2f} minutes")
+
+
