@@ -1,0 +1,386 @@
+Part 1:
+import numpy as np
+import matplotlib.pyplot as plt
+from numba import njit #Just in Time Compiler to speeden up the code
+import time
+
+N = 30 # Lattice size
+J = 1 # Coupling constant
+
+start_time = time.time() #Calculates time of simulation
+
+       
+sweeps = 3000 # Total number of lattice sweeps
+T_values = [3.5, 2.22, 2.27, 2.0]  # Temperatures for observation
+
+
+
+    
+def precompute_exponential_values(T_values):
+    # Precompute exponential values for the possible ΔE values in a 2D Ising model, making our algorithm faster as we dont need to calculate the few possible exponential values each time, can simply 
+    #it look up
+    delta_E = np.array([-8, -4, 0, 4, 8]) * J
+    precomputed_exp = {T: np.exp(-1 / T * delta_E) for T in T_values}
+    return precomputed_exp
+
+@njit
+def total_energy(system_state):
+    energy = 0
+    for i in range(N):
+        for j in range(N):
+            S = system_state[i, j]
+            neighbors = system_state[(i+1)%N, j] + system_state[(i-1)%N, j] + \
+                        system_state[i, (j+1)%N] + system_state[i, (j-1)%N]
+            energy += -J * S * neighbors
+    return energy / 2.0  # Correct double counting
+
+@njit
+def monte_carlo_step(system_state, exponential_values_for_T,E):
+   
+    for _ in range(N**2):  # One sweep = N^2 Monte Carlo steps
+        i, j = np.random.randint(0, N, 2)
+        spin = system_state[i, j]
+        delta_E = 2 * J * spin * (system_state[(i+1)%N, j] + system_state[i, (j+1)%N] + system_state[(i-1)%N, j] + system_state[i, (j-1)%N]) 
+        #Modulo N applies periodic boundary conditions
+                                 
+        index = (delta_E + 8) // 4  # Convert ΔE to an index for the exponential_values_for_T array
+        if delta_E <= 0 or np.random.rand() < exponential_values_for_T[index]:
+            system_state[i, j] = -spin
+            E += delta_E #we update the value of E each time we flip a spin by adding change in E, instead of recalculating it every time which would make our Simulation slow for large systems
+    return system_state, E 
+
+
+
+def simulate(N, sweeps, T, exponential_values_for_T, seed):
+    np.random.seed(seed)  # Set the seed for reproducibility
+    system_state = np.random.choice([-1, 1], (N, N))  # Initialize the system state
+    E_values, M_values = [], []
+    
+    E= total_energy(system_state)
+    
+    for _ in range(sweeps):
+        system_state, E = monte_carlo_step(system_state, exponential_values_for_T, E)
+        
+        M = np.sum(system_state)
+        E_values.append(E)
+        M_values.append(M)
+
+    return E_values, M_values
+
+def plot_simulation_results(N, sweeps, T_values, precomputed_exp):
+    # Define two seeds for generating the initial states
+    seeds = [42, 90]
+    
+    # Set up figure for plotting
+    fig, axs = plt.subplots(len(T_values), 2, figsize=(20, 21)) #8 Plots in 4 rows(4 different Temperatures for comparison), with 2 columns representing the values for Energy and mean Magnetization per spin
+
+    for i, T in enumerate(T_values): #We use enumerate() in a for loop to get the index & the item
+        exponential_values_for_T = precomputed_exp[T]
+        
+        # Initialize lists to hold energy and magnetization values for both seeds
+        E_values_seeds = []
+        M_values_seeds = []
+        
+        for seed in seeds:
+            # Simulate and store results for each seed
+            E_values, M_values = simulate(N, sweeps, T, exponential_values_for_T, seed)
+            E_values_seeds.append(E_values)
+            M_values_seeds.append(M_values)
+
+        # Plot Energy for this temperature, this would mean we are looking at the ith row, 1st column graph for all values of i
+        axs[i, 0].plot(np.arange(sweeps), E_values_seeds[0], label=f'Seed={seeds[0]}')
+        axs[i, 0].plot(np.arange(sweeps), E_values_seeds[1], label=f'Seed={seeds[1]}', linestyle='--')
+        axs[i, 0].set_xlabel('Lattice Sweeps')
+        axs[i, 0].set_ylabel('Energy')
+        axs[i, 0].set_title(f'Energy vs Sweeps at T={T}')
+        axs[i, 0].legend()
+
+        # Plot Magnetization for this temperature, this would mean we are looking at the ith row, 2nd column graph for all values of i
+        axs[i, 1].plot(np.arange(sweeps), [m/N**2 for m in M_values_seeds[0]], label=f'Seed={seeds[0]}')
+        axs[i, 1].plot(np.arange(sweeps), [m/N**2 for m in M_values_seeds[1]], label=f'Seed={seeds[1]}', linestyle='--')
+        axs[i, 1].set_xlabel('Lattice Sweeps')
+        axs[i, 1].set_ylabel('Magnetization per spin')
+        axs[i, 1].set_title(f'Magnetization vs Sweeps at T={T}')
+        axs[i, 1].legend()
+
+    plt.tight_layout() #Ensures the subplots don't overlap with each other or with the labels
+    
+    
+    
+    plt.show()
+
+
+# Precompute exponential values for all possible delta E values in a 2D Ising model
+precomputed_exp = precompute_exponential_values(T_values)
+
+# Run simulation and plot results for each temperature
+plot_simulation_results(N, sweeps, T_values, precomputed_exp)
+end_time = time.time()
+
+print(f"Total simulation time: {(end_time - start_time) / 60:.2f} minutes")
+
+
+Part 2:
+
+from scipy.integrate import simps
+
+
+def magnetic_susceptibility(magnetization, T):
+    return 1 / T / (N**2) * np.var(magnetization)
+
+def autocorrelation(datapoints):
+    M = len(datapoints)
+    autocorr = np.zeros(M)  # Initialize an array to store the autocorrelation function values at all times
+    for t in range(M):
+        # Calculating the mean product of datapoints and their lagged versions
+        mean_product = np.mean(datapoints[:M-t] * datapoints[t:])
+        # 2nd Term in Formula
+        mean_original = np.mean(datapoints[:M-t])
+        # 3rd Term in Formula
+        mean_lagged = np.mean(datapoints[t:])
+        # Implementing the formula from the book
+        autocorr[t] = mean_product - mean_original * mean_lagged
+    return autocorr
+
+N = 50  # Lattice size
+sweeps = 3000  # Total number of lattice sweeps
+T_values = np.linspace(2, 3.5, 20)  # Temperature range
+repetitions = 5  # Number of repetitions for error analysis
+
+correlation_times_means = []
+correlation_times_stds = []
+susceptibility_means = []
+susceptibility_stds = []
+
+start_time = time.time()
+for T in T_values:
+    correlation_times_rep = []
+    susceptibility_values_rep = []
+    
+    for _ in range(repetitions):
+        if T > 2.25 and T < 2.27:
+            additional_sweeps = N * 250
+        else:
+            additional_sweeps = N * 80
+            
+        E_values, M_values = simulate(N, sweeps + additional_sweeps, T, precomputed_exp[T], seed=42)
+        datapoints = np.array(M_values[additional_sweeps:])  # Use magnetization values after equilibration
+        
+        susceptibility_value = magnetic_susceptibility(datapoints, T)
+        autocorr_fct = autocorrelation(datapoints)
+        normalized_autocorr_fct = autocorr_fct / autocorr_fct[0]  # Normalize
+        
+        min_indices = np.where(normalized_autocorr_fct < 0.1)[0]
+        min_index = min_indices[0] if min_indices.size > 0 else len(normalized_autocorr_fct) - 1
+        correlation_time = simps(normalized_autocorr_fct[:min_index + 1], dx=1)
+        
+        correlation_times_rep.append(correlation_time)
+        susceptibility_values_rep.append(susceptibility_value)
+    
+    # Calculate mean and standard deviation for this temperature
+    correlation_times_means.append(np.mean(correlation_times_rep))
+    correlation_times_stds.append(np.std(correlation_times_rep))
+    susceptibility_means.append(np.mean(susceptibility_values_rep))
+    susceptibility_stds.append(np.std(susceptibility_values_rep))
+
+# Plotting with error bars
+plt.figure(figsize=(10, 6))
+plt.errorbar(T_values, correlation_times_means, yerr=correlation_times_stds, fmt='o-', color='blue', ecolor='darkgray', elinewidth=2, capsize=5, label='Correlation Time')
+plt.xlabel('Temperature (T)')
+plt.ylabel('Correlation Time in Lattice Sweeps')
+plt.title('Correlation Time vs. Temperature')
+plt.grid(True)
+plt.legend()
+plt.show()
+
+# Plotting Magnetic Susceptibility with customized error bars
+plt.figure(figsize=(10, 6))
+plt.errorbar(T_values, susceptibility_means, yerr=susceptibility_stds, fmt='o-', color='red', ecolor='darkgray', elinewidth=2, capsize=5, label='Magnetic Susceptibility')
+plt.xlabel('Temperature (T)')
+plt.ylabel('Magnetic susceptibility')
+plt.title('Magnetic Susceptibility vs. Temperature')
+plt.grid(True)
+plt.legend()
+plt.show()
+
+end_time = time.time()
+print(f"Total simulation time: {(end_time - start_time) / 60:.2f} minutes")
+
+Part 3:
+
+@njit
+def wolff_step(system_state, T, seed=None):
+    if seed is not None: #Uses the appropriate seed for the RNG to help us with debugging later
+        np.random.seed(seed)
+    i, j = np.random.randint(0, N, size=2)
+    P_add = 1 - np.exp(-2 * J / T)
+    
+    cluster = {(i, j)} #Checks which spins are part of Cluster
+    to_be_flipped = [(i, j)] #Checks which spins have been checked already in order to possibly add neighbours
+    while to_be_flipped: #While loop iteratates over the list of spins to be flipped in order to add all neighbours
+        i, j = to_be_flipped.pop() #We can look at it as a stack and hence add elements using the pop function
+        for di, dj in [(-1, 0), (1, 0), (0, -1), (0, 1)]:
+            ni, nj = (i + di) % N, (j + dj) % N
+            if (ni, nj) not in cluster and system_state[ni, nj] == system_state[i, j]:
+                if np.random.rand() < P_add:
+                    to_be_flipped.append((ni, nj)) 
+                    cluster.add((ni, nj)) #Add the spin to the cluster
+    for i, j in cluster:
+        system_state[i, j] *= -1 #Flips the state of the spins which have been added to the cluster
+    return system_state, len(cluster)
+
+def simulate_wolff(N, steps, T, seed=42): #Perform our simulation of the Wolff Algorithm, we're using the same seed for consistency
+    np.random.seed(seed)
+    system_state = np.random.choice([-1, 1], (N, N))
+    E_values, M_values, total_flips = [], [], 0
+    
+    for _ in range(steps): #we define it steps since it now represents Wolff Algorithm steps instead of Sweeps across Whole Lattice as in Metropolis Algorithm
+    
+        system_state, flips = wolff_step(system_state, T, seed=None)  # Ensure seed is used only once
+        total_flips += flips
+        E_values.append(total_energy(system_state))
+        M_values.append(np.sum(system_state))
+
+    average_flips = total_flips / steps 
+    return E_values, M_values, average_flips
+
+
+
+def simulate_wolff_error_analysis(N, steps, T_values, repetitions=5):
+    mean_correlation_times = []
+    std_correlation_times = []
+    
+    for T in T_values:
+        correlation_times = []
+        for _ in range(repetitions):
+            _, M_values, _ = simulate_wolff(N, steps, T)
+            autocorr_values = autocorrelation(np.array(M_values)[1000:])
+            normalized_autocorr = autocorr_values / autocorr_values[0]
+            min_indices = np.where(normalized_autocorr < 0.1)[0]
+            min_index = min_indices[0] if min_indices.size > 0 else len(normalized_autocorr) - 1
+            correlation_time = simps(normalized_autocorr[:min_index+1], dx=1)
+            correlation_times.append(correlation_time)
+        
+        mean_correlation_times.append(np.mean(correlation_times))
+        std_correlation_times.append(np.std(correlation_times))
+    
+    return T_values, mean_correlation_times, std_correlation_times
+
+start_time = time.time()
+N = 100
+steps = 5000
+T_values = np.linspace(2, 3.5, 20)
+
+# Perform the simulation with error analysis
+T_values, mean_correlation_times, std_correlatio n_times = simulate_wolff_error_analysis(N, steps, T_values, repetitions=3)
+
+# Plotting the scaled correlation times with error bars
+plt.figure(figsize=(10, 6))
+plt.errorbar(T_values, mean_correlation_times, yerr=std_correlation_times, fmt='o-', color='blue', ecolor='darkgray', capsize=5)
+plt.xlabel('Temperature (T)')
+plt.ylabel('Scaled Correlation Time')
+plt.title('Correlation Time vs Temperature for Wolff Algorithm with Error Bars')
+plt.grid(True)
+plt.show()
+
+end_time = time.time()
+print(f"Total simulation time: {(end_time - start_time) / 60:.2f} minutes")
+
+Part 4:
+@njit
+def swendsen_wang_step(lattice, T):
+    P_add = 1 - np.exp(-2 * J / T)  # Probability to add a bond
+    label = np.zeros_like(lattice, dtype=np.int32) - 1 # create an array with same shape as cluster, initially all with value -1 to  label which sites are part of cluster. Tracks which sites have been visited already
+    cluster_id = 0 #Initially have the cluster ID counter set to 0, and each cluster should have it's own ID Number to potentially flip it
+    clusters = []  # List to store clusters for efficient flipping
+
+    for i in range(N): #Go through all lattice sites
+        for j in range(N):
+            if label[i, j] == -1: # If the value is -1, it means the site not yet labeled, signifies the start of a new cluster
+                stack = [(i, j)] # if current site is unlabeled, create a stack with the current site and label the sites with the current cluster identification number
+                label[i, j] = cluster_id
+                current_cluster = [(i, j)]  # Initialize current cluster
+
+                while stack: #Continue as long as there are sites in the stack
+                    x, y = stack.pop()
+                    for dx, dy in [(1, 0), (-1, 0), (0, 1), (0, -1)]: #Iterate over the four current neighbours
+                        nx, ny = (x + dx) % N, (y + dy) % N
+                        if label[nx, ny] == -1 and lattice[x, y] == lattice[nx, ny] and np.random.random() < P_add:  #Checks whether the neighbour hasn't been already considered, if it matches the current spin state and if it probabilistically gets added
+                            stack.append((nx, ny)) #If all conditions are met, neighbours are added to the cluster and labelled with the current cluster id
+                            label[nx, ny] = cluster_id
+                            current_cluster.append((nx, ny))
+                clusters.append(current_cluster)
+                cluster_id += 1
+
+                
+               
+                            
+    # Manually flip the clusters
+    for cluster in clusters:
+        if np.random.random() < 0.5:
+            for i, j in cluster:
+                lattice[i, j] *= -1
+    return lattice
+
+def simulate_swendsen_wang(N, steps, T):
+    lattice = np.random.choice([-1, 1], size=(N, N))
+    magnetizations = []
+    for _ in range(steps):
+        lattice = swendsen_wang_step(lattice, T)
+        magnetizations.append(np.sum(lattice))
+    return np.array(magnetizations)
+
+def autocorrelation(datapoints):
+    M = len(datapoints)
+    autocorr = np.zeros(M)
+    for t in range(M):
+        mean_product = np.mean(datapoints[:M-t] * datapoints[t:])
+        mean_original = np.mean(datapoints[:M-t])
+        mean_lagged = np.mean(datapoints[t:])
+        autocorr[t] = mean_product - mean_original * mean_lagged
+    return autocorr
+
+def simulate_swendsen_wang_with_error_analysis(N, steps, T_values, repetitions=5):
+    correlation_times_means = []
+    correlation_times_stds = []
+    
+    for T in T_values:
+        correlation_times_rep = []
+        
+        for _ in range(repetitions):
+            mags = simulate_swendsen_wang(N, steps, T)
+            acf = autocorrelation(mags[1000:])
+            normalized_acf = acf / acf[0]
+            min_indices = np.where(normalized_acf < 0.1)[0]
+            min_index = min_indices[0] if min_indices.size > 0 else len(normalized_acf) - 1
+            correlation_time = simps(normalized_acf[:min_index+1], dx=1)
+            correlation_times_rep.append(correlation_time)
+        
+        correlation_times_means.append(np.mean(correlation_times_rep))
+        correlation_times_stds.append(np.std(correlation_times_rep))
+    
+    return T_values, correlation_times_means, correlation_times_stds
+
+# Prepare to measure simulation time
+start_time = time.time()
+
+# Parameters remain unchanged
+N = 100  # Lattice size
+steps = 2000  # Simulation steps
+T_values = np.linspace(2, 3.5, 20)  # Temperature range
+
+# Perform the simulation with error analysis
+T_values, correlation_times_means, correlation_times_stds = simulate_swendsen_wang_with_error_analysis(N, steps, T_values, repetitions=5)
+
+# Plotting the correlation times with error bars
+plt.figure(figsize=(10, 6))
+plt.errorbar(T_values, correlation_times_means, yerr=correlation_times_stds, fmt='o-', color='blue', ecolor='lightgray', capsize=5)
+plt.xlabel('Temperature (T)')
+plt.ylabel('Scaled Correlation Time')
+plt.title('Correlation Time vs Temperature for Swendsen-Wang Algorithm with Error Bars')
+plt.grid(True)
+plt.show()
+
+# Show total simulation time
+end_time = time.time()
+print(f"Total simulation time: {(end_time - start_time) / 60:.2f} minutes")
