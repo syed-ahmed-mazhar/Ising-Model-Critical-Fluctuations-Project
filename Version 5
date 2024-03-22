@@ -122,27 +122,32 @@ print(f"Total simulation time: {(end_time - start_time) / 60:.2f} minutes")
 
 Part 2:
 
+
 from scipy.integrate import simps
 
+
+import numpy as np
+import matplotlib.pyplot as plt
+from scipy.integrate import simps
+from numba import njit # Assuming this is needed elsewhere in your provided or existing functions
+
+# Assuming precompute_exponential_values and simulate functions are defined elsewhere
+# Ensure these functions are defined or correctly imported if they are in separate modules
 
 def magnetic_susceptibility(magnetization, T):
     return 1 / T / (N**2) * np.var(magnetization)
 
 def autocorrelation(datapoints):
     M = len(datapoints)
-    autocorr = np.zeros(M)  # Initialize an array to store the autocorrelation function values at all times
+    autocorr = np.zeros(M)  # Initialize an array to store the autocorrelation function values
     for t in range(M):
-        # Calculating the mean product of datapoints and their lagged versions
         mean_product = np.mean(datapoints[:M-t] * datapoints[t:])
-        # 2nd Term in Formula
         mean_original = np.mean(datapoints[:M-t])
-        # 3rd Term in Formula
         mean_lagged = np.mean(datapoints[t:])
-        # Implementing the formula from the book
         autocorr[t] = mean_product - mean_original * mean_lagged
     return autocorr
 
-N = 50  # Lattice size
+N = 30  # Lattice size
 sweeps = 3000  # Total number of lattice sweeps
 T_values = np.linspace(2, 3.5, 20)  # Temperature range
 repetitions = 5  # Number of repetitions for error analysis
@@ -153,37 +158,29 @@ susceptibility_means = []
 susceptibility_stds = []
 
 start_time = time.time()
+
 for T in T_values:
     correlation_times_rep = []
     susceptibility_values_rep = []
     
     for _ in range(repetitions):
-        if T > 2.25 and T < 2.27:
-            additional_sweeps = N * 250
-        else:
-            additional_sweeps = N * 80
-            
+        additional_sweeps = N * 250 if T > 2.25 and T < 2.27 else N * 80
         E_values, M_values = simulate(N, sweeps + additional_sweeps, T, precomputed_exp[T], seed=42)
-        datapoints = np.array(M_values[additional_sweeps:])  # Use magnetization values after equilibration
+        datapoints = np.array(M_values[additional_sweeps:])
         
-        susceptibility_value = magnetic_susceptibility(datapoints, T)
+        susceptibility_values_rep.append(magnetic_susceptibility(datapoints, T))
         autocorr_fct = autocorrelation(datapoints)
-        normalized_autocorr_fct = autocorr_fct / autocorr_fct[0]  # Normalize
-        
+        normalized_autocorr_fct = autocorr_fct / autocorr_fct[0]
         min_indices = np.where(normalized_autocorr_fct < 0.1)[0]
         min_index = min_indices[0] if min_indices.size > 0 else len(normalized_autocorr_fct) - 1
-        correlation_time = simps(normalized_autocorr_fct[:min_index + 1], dx=1)
-        
-        correlation_times_rep.append(correlation_time)
-        susceptibility_values_rep.append(susceptibility_value)
+        correlation_times_rep.append(simps(normalized_autocorr_fct[:min_index + 1], dx=1))
     
-    # Calculate mean and standard deviation for this temperature
     correlation_times_means.append(np.mean(correlation_times_rep))
     correlation_times_stds.append(np.std(correlation_times_rep))
     susceptibility_means.append(np.mean(susceptibility_values_rep))
     susceptibility_stds.append(np.std(susceptibility_values_rep))
 
-# Plotting with error bars
+# Plotting should be outside the for loop
 plt.figure(figsize=(10, 6))
 plt.errorbar(T_values, correlation_times_means, yerr=correlation_times_stds, fmt='o-', color='blue', ecolor='darkgray', elinewidth=2, capsize=5, label='Correlation Time')
 plt.xlabel('Temperature (T)')
@@ -193,7 +190,6 @@ plt.grid(True)
 plt.legend()
 plt.show()
 
-# Plotting Magnetic Susceptibility with customized error bars
 plt.figure(figsize=(10, 6))
 plt.errorbar(T_values, susceptibility_means, yerr=susceptibility_stds, fmt='o-', color='red', ecolor='darkgray', elinewidth=2, capsize=5, label='Magnetic Susceptibility')
 plt.xlabel('Temperature (T)')
@@ -203,11 +199,12 @@ plt.grid(True)
 plt.legend()
 plt.show()
 
+
 end_time = time.time()
-print(f"Total simulation time: {(end_time - start_time) / 60:.2f} minutes")
+
+print(f"Total simulation time: {(time.time() - start_time) / 60:.2f} minutes")
 
 Part 3:
-
 @njit
 def wolff_step(system_state, T, seed=None):
     if seed is not None: #Uses the appropriate seed for the RNG to help us with debugging later
@@ -272,7 +269,7 @@ steps = 5000
 T_values = np.linspace(2, 3.5, 20)
 
 # Perform the simulation with error analysis
-T_values, mean_correlation_times, std_correlatio n_times = simulate_wolff_error_analysis(N, steps, T_values, repetitions=3)
+T_values, mean_correlation_times, std_correlation_times = simulate_wolff_error_analysis(N, steps, T_values, repetitions=3)
 
 # Plotting the scaled correlation times with error bars
 plt.figure(figsize=(10, 6))
