@@ -374,7 +374,7 @@ T_values, correlation_times_means, correlation_times_stds = simulate_swendsen_wa
 
 # Plotting the correlation times with error bars
 plt.figure(figsize=(10, 6))
-plt.errorbar(T_values, correlation_times_means, yerr=correlation_times_stds, fmt='o-', color='blue', ecolor='lightgray', capsize=5)
+plt.errorbar(T_values, correlation_times_means * 10 , yerr=correlation_times_stds, fmt='o-', color='blue', ecolor='lightgray', capsize=5)
 plt.xlabel('Temperature (T)')
 plt.ylabel('Scaled Correlation Time')
 plt.title('Correlation Time vs Temperature for Swendsen-Wang Algorithm with Error Bars')
